@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 MAX_IMAGES = 2
 MAX_EMOJI: dict[Persona, int] = {"klod": 0, "chaty": 1}  # на всю відповідь
+REACTION_COOLDOWN_MESSAGES = 8  # не частіше однієї реакції на стільки повідомлень
 LEARNED_EXAMPLES = 20  # скільки останніх /топ і /кринж класти в промпт
 IMAGE_CACHE_SIZE = 10
 NIGHT_START = time(1, 0)  # «написати першим» після живої розмови ок і пізно ввечері
@@ -245,6 +246,11 @@ class Engine:
     async def _react(self, chat_id: int, action: Action, message_id: int | None) -> None:
         if message_id is None:
             return
+        recent = await self.db.recent(chat_id, REACTION_COOLDOWN_MESSAGES)
+        asked = any("реакц" in m.text.lower() for m in recent[-2:] if m.author == "user")
+        if not asked and any(m.text.startswith("[реакція") for m in recent):
+            log.info("chat %s: reaction skipped (one was just made)", chat_id)
+            return
         try:
             await self.sender.react(chat_id, action.who, message_id, action.emoji)
         except Exception:
@@ -269,7 +275,7 @@ class Engine:
             if raw is None:
                 return None
             sent = []
-            parts = humanize(drop_drafts(clean_reply(raw)), self.rng)
+            parts = humanize(drop_drafts(clean_reply(raw, self.user_name)), self.rng)
             parts = limit_emoji(parts, MAX_EMOJI[persona], self.rng)
             for i, part in enumerate(parts):
                 # Час «набору» як у людини; для першої частини враховуємо, скільки модель уже думала.

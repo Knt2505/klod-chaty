@@ -332,3 +332,24 @@ async def test_bot_message_found_by_text_when_ids_differ(setup):
     assert await db.bot_message(1, 999) is None
     found = await db.bot_message(1, 999, "chaty", "та я з лавки, але на звязку")
     assert found == ("chaty", "та я з лавки, але на звязку", "а чо він дід")
+
+
+def test_clean_reply_drops_script_lines():
+    raw = ("ну от, нарешті. казав же, що reply це не магія\n"
+           "ден: це ти ще сто раз згадай бовдур, Клод відповідає коротко, без допиту\n"
+           "(Чаті ставить 🤣)")
+    assert clean_reply(raw, "Ден") == "ну от, нарешті. казав же, що reply це не магія"
+
+
+async def test_reactions_have_cooldown(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("chaty", "reaction", "🔥", "")), plan(("chaty", "reaction", "🤣", ""))]
+    await engine.on_user_message(1, "о", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    await engine.on_user_message(1, "працює", 6, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert sender.reactions == [("chaty", 5, "🔥")]
+    llm.plans = [plan(("chaty", "reaction", "👍", ""))]
+    await engine.on_user_message(1, "постав реакцію", 7, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert sender.reactions[-1] == ("chaty", 7, "👍")  # на прохання — можна

@@ -77,6 +77,24 @@ def _hint(meaning: str, intent: str) -> str:
 _NAME_PREFIX = re.compile(r"^\s*(\[[^\]]*\]\s*)?(Клод|Чаті)\s*:\s*", re.IGNORECASE)
 
 
-def clean_reply(text: str) -> str:
-    """Прибирає «Клод:» чи «[Пн 18:02] Чаті:» на початку, якщо модель їх додала."""
-    return _NAME_PREFIX.sub("", text, count=1).strip()
+_STAGE_DIRECTION = re.compile(r"^\s*\(.*\)\s*$")
+_THIRD_PERSON = re.compile(r"\b(Клод|Чаті)\s+(відповідає|пише|ставить|мовчить)\b", re.IGNORECASE)
+
+
+def clean_reply(text: str, user_name: str = "") -> str:
+    """Прибирає службове: «Клод:» на початку, а також рядки-«сценарій».
+
+    Модель іноді копіює формат прикладів і пише репліки за інших («ден: …»),
+    ремарки («(Чаті ставить 🤣)») чи опис себе в третій особі («Клод відповідає коротко»).
+    """
+    text = _NAME_PREFIX.sub("", text, count=1).strip()
+    names = ["клод", "чаті"] + ([user_name.lower()] if user_name else [])
+    script_line = re.compile(rf"^\s*({'|'.join(map(re.escape, names))})\s*:", re.IGNORECASE)
+    kept = [
+        line
+        for line in text.split("\n")
+        if not script_line.match(line)
+        and not _STAGE_DIRECTION.match(line)
+        and not _THIRD_PERSON.search(line)
+    ]
+    return "\n".join(kept).strip()
