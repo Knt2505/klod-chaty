@@ -277,3 +277,17 @@ async def test_reply_to_known_message_only(setup):
     await asyncio.sleep(0.2)
     assert sender.replies == [10, None]  # 999 нема в історії — reply прибрано
     assert "#10 " in llm.director_prompts[0][1]
+
+
+def test_humanize_splits_only_sometimes_with_rng():
+    from app.style import humanize
+
+    text = "ок, це вже норм тема. давай спробуємо завтра зранку"
+    always = random.Random(0)
+    always.random = lambda: 0.0
+    never = random.Random(0)
+    never.random = lambda: 0.99
+    assert len(humanize(text, always)) == 2
+    assert humanize(text, never) == ["ок, це вже норм тема. давай спробуємо завтра зранку"]
+    very_long = "дуже довге речення про все на світі і ще трохи. " * 4
+    assert len(humanize(very_long, never)) > 1

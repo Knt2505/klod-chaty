@@ -267,7 +267,7 @@ class Engine:
             if raw is None:
                 return None
             sent = []
-            for i, part in enumerate(humanize(clean_reply(raw))):
+            for i, part in enumerate(humanize(clean_reply(raw), self.rng)):
                 # Час «набору» як у людини; для першої частини враховуємо, скільки модель уже думала.
                 wait = typing_seconds(part) * self.typing_pace
                 if i == 0:

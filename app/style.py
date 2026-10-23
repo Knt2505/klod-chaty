@@ -1,9 +1,12 @@
 """Людський вигляд повідомлень: маленькі літери, без абзаців, без крапки в кінці."""
 
+import random
 import re
 
 MAX_PARTS = 5
-MAX_PART_LENGTH = 50  # довше — ріжемо по реченнях на окремі повідомлення
+MAX_PART_LENGTH = 50  # довше — можна різати по реченнях на окремі повідомлення
+ALWAYS_SPLIT_LENGTH = 140  # а таке довге — ріжемо завжди
+SPLIT_CHANCE = 0.4  # як часто ділимо середні повідомлення, щоб не було шаблонно
 
 _PARAGRAPHS = re.compile(r"\n\s*\n")
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
@@ -48,10 +51,19 @@ def _split_long(paragraph: str) -> list[str]:
     return chunks
 
 
-def humanize(text: str) -> list[str]:
-    """Розбиває відповідь на 1–5 коротких повідомлень і робить їх схожими на людські."""
+def humanize(text: str, rng: random.Random | None = None) -> list[str]:
+    """Розбиває відповідь на 1–5 повідомлень і робить їх схожими на людські.
+
+    Без rng середні абзаци ділимо завжди (детерміновано, для тестів);
+    з rng — лише іноді, як людина, яка то пише одним, то кількома повідомленнями.
+    """
     paragraphs = [" ".join(p.split()) for p in _PARAGRAPHS.split(text.strip())]
-    parts = [chunk for p in paragraphs if p for chunk in _split_long(p)]
+    parts = []
+    for p in paragraphs:
+        if not p:
+            continue
+        split = len(p) > ALWAYS_SPLIT_LENGTH or rng is None or rng.random() < SPLIT_CHANCE
+        parts.extend(_split_long(p) if split else [p])
     if len(parts) > MAX_PARTS:
         parts = parts[: MAX_PARTS - 1] + [" ".join(parts[MAX_PARTS - 1 :])]
     return [_drop_final_period(_lower_sentence_starts(_plain_punctuation(p))) for p in parts]
