@@ -114,7 +114,8 @@ def test_humanize():
     from app.style import humanize
 
     text = "Клод тут. Чаті, не мовчи.\n\nДен, \"імба\" щодо чого? Скажи що."
-    assert humanize(text) == ["клод тут. чаті, не мовчи", "ден, \"імба\" щодо чого? скажи що"]
+    assert humanize(text) == ["клод тут. чаті, не мовчи", "ден, імба щодо чого? скажи що"]
+    assert humanize("ок, чесно — тут «так» і все") == ["ок, чесно, тут так і все"]
     assert humanize("ПОВАЖАЮ. API впало...") == ["ПОВАЖАЮ. API впало..."]
     assert humanize("а\n\nб\n\nв\n\nг") == ["а", "б в г"]
     assert humanize("рядок\nще рядок") == ["рядок ще рядок"]

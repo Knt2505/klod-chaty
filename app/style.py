@@ -26,10 +26,19 @@ def _drop_final_period(text: str) -> str:
     return text
 
 
+_QUOTES = re.compile(r"[\"«»“”„]")
+_DASH = re.compile(r"\s*[—–]\s*")
+
+
+def _plain_punctuation(text: str) -> str:
+    """Без лапок і довгих тире — люди в чаті так не пишуть, це видає ШІ."""
+    return _DASH.sub(", ", _QUOTES.sub("", text)).replace(", ,", ",")
+
+
 def humanize(text: str) -> list[str]:
     """Розбиває відповідь на 1–3 повідомлення і робить їх схожими на людські."""
     parts = [" ".join(p.split()) for p in _PARAGRAPHS.split(text.strip())]
     parts = [p for p in parts if p]
     if len(parts) > MAX_PARTS:
         parts = parts[: MAX_PARTS - 1] + [" ".join(parts[MAX_PARTS - 1 :])]
-    return [_drop_final_period(_lower_sentence_starts(p)) for p in parts]
+    return [_drop_final_period(_lower_sentence_starts(_plain_punctuation(p))) for p in parts]
