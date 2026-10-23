@@ -35,7 +35,7 @@ async def setup(tmp_path):
     await db.connect()
     llm, sender = FakeLLM(), FakeSender()
     engine = Engine(db, llm, sender, timezone="America/Chicago", debounce_seconds=0.05,
-                    history_limit=30, rng=random.Random(1))
+                    history_limit=30, rng=random.Random(1), typing_pace=0)
     yield engine, db, llm, sender
     await db.close()
 
@@ -85,3 +85,13 @@ async def test_binding_persists_and_migrates(setup, tmp_path):
     reloaded = await Binding.load(cfg, db)
     assert (reloaded.chat_id, reloaded.owner_id) == (-200, 42)
     assert [m.text for m in await db.recent(-200, 5)] == ["йо"]
+
+
+def test_humanize():
+    from app.style import humanize
+
+    text = "Клод тут. Чаті, не мовчи.\n\nДен, \"імба\" щодо чого? Скажи що."
+    assert humanize(text) == ["клод тут. чаті, не мовчи", "ден, \"імба\" щодо чого? скажи що"]
+    assert humanize("ПОВАЖАЮ. API впало...") == ["ПОВАЖАЮ. API впало..."]
+    assert humanize("а\n\nб\n\nв\n\nг") == ["а", "б", "в г"]
+    assert humanize("рядок\nще рядок") == ["рядок ще рядок"]

@@ -13,6 +13,7 @@ from . import director
 from .db import Database
 from .models import Author, Message, Persona
 from .personas import system_prompt
+from .style import humanize
 from .transcript import build_prompt, clean_reply
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class Engine:
         debounce_seconds: float,
         history_limit: int,
         rng: random.Random | None = None,
+        typing_pace: float = 1.0,
     ):
         self.db = db
         self.llm = llm
@@ -47,6 +49,7 @@ class Engine:
         self.debounce_seconds = debounce_seconds
         self.history_limit = history_limit
         self.rng = rng or random.Random()
+        self.typing_pace = typing_pace
         self.user_name = "Друг"
         self._pending: dict[int, list[Message]] = {}
         self._timers: dict[int, asyncio.Task] = {}
@@ -104,8 +107,9 @@ class Engine:
         except Exception:
             log.exception("generation failed for %s", persona)
             return
-        text = clean_reply(raw)
-        if not text:
-            return
-        tg_id = await self.sender.send(chat_id, persona, text)
-        await self.db.add_message(chat_id, persona, text, tg_id)
+        for i, part in enumerate(humanize(clean_reply(raw))):
+            if i:
+                await self.sender.typing(chat_id, persona)
+                await asyncio.sleep(min(1 + len(part) / 40, 4) * self.typing_pace)
+            tg_id = await self.sender.send(chat_id, persona, part)
+            await self.db.add_message(chat_id, persona, part, tg_id)
