@@ -17,12 +17,13 @@ from .db import Database
 from .director import Action, Plan
 from .models import DISPLAY_NAMES, Author, Message, Persona
 from .personas import rules_block, system_prompt
-from .style import humanize
+from .style import drop_drafts, humanize, limit_emoji
 from .transcript import build_prompt, clean_reply, render_history
 
 log = logging.getLogger(__name__)
 
 MAX_IMAGES = 2
+MAX_EMOJI: dict[Persona, int] = {"klod": 0, "chaty": 1}  # на всю відповідь
 LEARNED_EXAMPLES = 20  # скільки останніх /топ і /кринж класти в промпт
 IMAGE_CACHE_SIZE = 10
 NIGHT_START = time(1, 0)  # «написати першим» після живої розмови ок і пізно ввечері
@@ -268,7 +269,9 @@ class Engine:
             if raw is None:
                 return None
             sent = []
-            for i, part in enumerate(humanize(clean_reply(raw), self.rng)):
+            parts = humanize(drop_drafts(clean_reply(raw)), self.rng)
+            parts = limit_emoji(parts, MAX_EMOJI[persona], self.rng)
+            for i, part in enumerate(parts):
                 # Час «набору» як у людини; для першої частини враховуємо, скільки модель уже думала.
                 wait = typing_seconds(part) * self.typing_pace
                 if i == 0:

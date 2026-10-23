@@ -67,3 +67,49 @@ def humanize(text: str, rng: random.Random | None = None) -> list[str]:
     if len(parts) > MAX_PARTS:
         parts = parts[: MAX_PARTS - 1] + [" ".join(parts[MAX_PARTS - 1 :])]
     return [_drop_final_period(_lower_sentence_starts(_plain_punctuation(p))) for p in parts]
+
+
+# --- чернетки і емодзі ----------------------------------------------------
+
+# Модель іноді «думає вголос»: пише варіант, а потім «ні, без емодзі. перепишу».
+_DRAFT_MARKER = re.compile(
+    r"(\bперепиш\w*|\bбез емодзі|\bінший варіант|\bваріант\s*\d|\bчернетк\w*"
+    r"|^ні,? (ще раз|коротше|не так))",
+    re.IGNORECASE,
+)
+MAX_MARKER_LENGTH = 60  # самовиправлення короткі; довгий рядок — це вже зміст
+_LINES = re.compile(r"\n+")
+
+
+def drop_drafts(text: str) -> str:
+    """Залишає тільки фінальний варіант, якщо у відповіді є самовиправлення."""
+    blocks = [b.strip() for b in _LINES.split(text.strip()) if b.strip()]
+    markers = [
+        i for i, b in enumerate(blocks) if len(b) <= MAX_MARKER_LENGTH and _DRAFT_MARKER.search(b)
+    ]
+    final = blocks[markers[-1] + 1 :] if markers else []
+    return "\n\n".join(final) if final else text
+
+
+_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u3200-\u32FF\uFE0F\u200D]+"
+)
+
+
+def limit_emoji(parts: list[str], max_emoji: int, rng: random.Random | None = None) -> list[str]:
+    """Залишає не більше max_emoji емодзі на всю відповідь (і то не завжди)."""
+    keep = max_emoji if rng is None or rng.random() < 0.5 else 0
+    result = []
+    for part in parts:
+
+        def repl(match: re.Match[str]) -> str:
+            nonlocal keep
+            if keep > 0:
+                keep -= 1
+                return match.group(0)
+            return ""
+
+        cleaned = " ".join(_EMOJI.sub(repl, part).split())
+        if cleaned:
+            result.append(cleaned)
+    return result

@@ -309,3 +309,17 @@ async def test_marked_examples_reach_prompt(setup):
     assert "КРИНЖ" in system and "- Чаті на «йо» → «відповідь 1»" in system
     assert "- Клод на «ок» → «ну ок»" in system
     assert "Приклади живого чату" in system and "Ден: йо" in system
+
+
+def test_drop_drafts_and_emoji():
+    from app.style import drop_drafts, limit_emoji
+
+    raw = ("ну, логічно. спокій це не тормоз 😌\n\nні, без емодзі. перепишу\n\n"
+           "та спокій це не тормоз 😌\n\nні, ще раз, без емодзі і коротше\n\n"
+           "спокій це не тормоз. просто не скачу від кожного пінгу")
+    assert drop_drafts(raw) == "спокій це не тормоз. просто не скачу від кожного пінгу"
+    assert drop_drafts("звичайна відповідь\nдругий рядок") == "звичайна відповідь\nдругий рядок"
+    assert drop_drafts("не вийшло\nспробуй ще раз завтра") == "не вийшло\nспробуй ще раз завтра"
+    assert limit_emoji(["та я тут 😌", "ну ок 🔥😎"], 1) == ["та я тут 😌", "ну ок"]
+    assert limit_emoji(["спокій 😌"], 0) == ["спокій"]
+    assert limit_emoji(["❤️‍🔥"], 0) == []
