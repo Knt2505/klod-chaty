@@ -18,6 +18,7 @@ class LLM:
         self.cfg = cfg
         self.anthropic = anthropic.AsyncAnthropic(api_key=cfg.anthropic_api_key)
         self.openai = openai.AsyncOpenAI(api_key=cfg.openai_api_key)
+        self.reasoning_effort = cfg.chaty_reasoning_effort
 
     async def generate(self, persona: Persona, system: str, prompt: str) -> str:
         if persona == "klod":
@@ -39,15 +40,23 @@ class LLM:
         return "".join(block.text for block in response.content if block.type == "text").strip()
 
     async def _gpt(self, system: str, prompt: str) -> str:
-        kwargs = {}
-        if self.cfg.chaty_reasoning_effort:
-            kwargs["reasoning"] = {"effort": self.cfg.chaty_reasoning_effort}
-        response = await self.openai.responses.create(
-            model=self.cfg.chaty_model,
-            instructions=system,
-            input=prompt,
-            max_output_tokens=MAX_OUTPUT_TOKENS,
-            **kwargs,
-        )
+        request = {
+            "model": self.cfg.chaty_model,
+            "instructions": system,
+            "input": prompt,
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
+        }
+        if self.reasoning_effort:
+            request["reasoning"] = {"effort": self.reasoning_effort}
+        try:
+            response = await self.openai.responses.create(**request)
+        except openai.BadRequestError:
+            if "reasoning" not in request:
+                raise
+            # Модель не приймає reasoning — далі працюємо без нього.
+            log.warning("model %s rejected reasoning param, retrying without it", self.cfg.chaty_model)
+            self.reasoning_effort = None
+            del request["reasoning"]
+            response = await self.openai.responses.create(**request)
         log.info("gpt usage: %s", response.usage)
         return response.output_text.strip()

@@ -3,6 +3,8 @@ from zoneinfo import ZoneInfo
 
 from .models import DISPLAY_NAMES, Message, Persona
 
+NEW_ACQUAINTANCE_MESSAGES = 10
+
 
 def author_name(author: str, user_name: str) -> str:
     return user_name if author == "user" else DISPLAY_NAMES[author]
@@ -23,8 +25,13 @@ def render_history(history: list[Message], user_name: str, tz: ZoneInfo) -> str:
 
 
 def build_prompt(persona: Persona, history: list[Message], user_name: str, tz: ZoneInfo) -> str:
+    intro = (
+        f"Ви щойно почали спілкуватися і майже нічого не знаєте про {user_name}.\n\n"
+        if len(history) < NEW_ACQUAINTANCE_MESSAGES
+        else ""
+    )
     return (
-        "Останні повідомлення в груповому чаті:\n\n"
+        intro + "Останні повідомлення в груповому чаті:\n\n"
         f"{render_history(history, user_name, tz)}\n\n"
         f"Напиши наступне повідомлення від імені {DISPLAY_NAMES[persona]}."
     )
