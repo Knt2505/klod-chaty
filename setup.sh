@@ -55,4 +55,4 @@ docker compose up -d --build
 echo
 echo "Готово! Бот запущений."
 echo "Тепер у своїй групі з Клодом і Чаті напиши: /bind"
-echo "Логи: cd $DIR && docker compose logs -f --tail 50"
+echo "Логи: sudo docker compose -f $DIR/docker-compose.yml logs -f --tail 50"
