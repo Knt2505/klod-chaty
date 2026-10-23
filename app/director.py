@@ -72,6 +72,7 @@ class Action:
     kind: str  # "text" | "reaction"
     emoji: str = ""
     intent: str = ""
+    reply_to: int = 0  # номер повідомлення для reply / реакції; 0 — без reply
 
 
 @dataclass(frozen=True)
@@ -94,8 +95,9 @@ PLAN_SCHEMA = {
                     "action": {"type": "string", "enum": ["text", "reaction"]},
                     "emoji": {"type": "string", "enum": ["", *REACTIONS]},
                     "intent": {"type": "string"},
+                    "reply_to": {"type": "integer"},
                 },
-                "required": ["who", "action", "emoji", "intent"],
+                "required": ["who", "action", "emoji", "intent", "reply_to"],
                 "additionalProperties": False,
             },
         },
@@ -112,7 +114,7 @@ DIRECTOR_SYSTEM = """\
 
 Поверни JSON:
 - meaning: що {user_name} насправді мав на увазі, одним реченням (з урахуванням контексту).
-- plan: 0–2 дії по черзі. Дія: who (klod/chaty), action (text — написати повідомлення, reaction — поставити емодзі на останнє повідомлення {user_name}), emoji (тільки для reaction, інакше ""), intent (для text: коротко, що сказати по суті, не готовий текст; для reaction: "").
+- plan: 0–2 дії по черзі. Дія: who (klod/chaty), action (text — написати повідомлення, reaction — поставити емодзі на останнє повідомлення {user_name}), emoji (тільки для reaction, інакше ""), intent (для text: коротко, що сказати по суті, не готовий текст; для reaction: ""), reply_to (номер повідомлення #N з історії).
 - quiet_minutes: якщо {user_name} просить не заважати / дати спокій / тишу — на скільки хвилин (не вказано — {default_quiet}, «до ранку/завтра» — до 8:00). Інакше 0.
 
 Як вирішувати:
@@ -122,6 +124,8 @@ DIRECTOR_SYSTEM = """\
 - Якщо тексту не треба (ок, 👍, хаха, дякую, добраніч після прощання) — краще одна reaction або порожній plan.
 - Прохання про тишу — максимум reaction 👌 або 🫡 і quiet_minutes.
 - Не допитуватися: intent ніколи не має бути «попросити пояснити».
+- reply_to для text: номер повідомлення, якщо відповідь стосується конкретного повідомлення, яке вже НЕ останнє в чаті (після нього хтось писав), або {user_name} написав кілька повідомлень про різне і відповідь на одне з них. Якщо відповідаєш на останнє повідомлення — 0 (люди рідко роблять reply на щойно написане).
+- reply_to для reaction: номер повідомлення, на яке ставиться емодзі (0 — на останнє повідомлення {user_name}).
 {rules}"""
 
 NUDGE_TASK = """\
@@ -144,7 +148,7 @@ def parse_plan(data: dict) -> Plan:
         emoji = item.get("emoji", "")
         if kind == "reaction" and emoji not in REACTIONS:
             continue
-        actions.append(Action(who, kind, emoji, item.get("intent", "")))
+        actions.append(Action(who, kind, emoji, item.get("intent", ""), int(item.get("reply_to") or 0)))
     return Plan(data.get("meaning", ""), actions, max(0, int(data.get("quiet_minutes", 0) or 0)))
 
 

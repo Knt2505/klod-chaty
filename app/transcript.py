@@ -11,9 +11,14 @@ def author_name(author: str, user_name: str) -> str:
 
 
 def render_history(
-    history: list[Message], user_name: str, tz: ZoneInfo, attached: list[str] | None = None
+    history: list[Message],
+    user_name: str,
+    tz: ZoneInfo,
+    attached: list[str] | None = None,
+    with_ids: bool = False,
 ) -> str:
-    """attached=None — не позначати фото взагалі (для режисера, який їх не бачить)."""
+    """attached=None — не позначати фото взагалі (для режисера, який їх не бачить).
+    with_ids — показати номери повідомлень, щоб режисер міг обрати, на що робити reply."""
     lines = []
     for msg in history:
         stamp = msg.created_at.astimezone(tz).strftime("%a %H:%M")
@@ -30,7 +35,8 @@ def render_history(
             image = f" (фото №{attached.index(msg.image_file_id) + 1}, прикріплене — ти його бачиш)"
         else:
             image = " (старе фото, ти його вже не бачиш)"
-        lines.append(f"[{stamp}] {name}{reply}: {msg.text}{image}")
+        number = f"#{msg.tg_id} " if with_ids and msg.tg_id else ""
+        lines.append(f"{number}[{stamp}] {name}{reply}: {msg.text}{image}")
     return "\n".join(lines)
 
 

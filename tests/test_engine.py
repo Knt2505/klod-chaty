@@ -31,12 +31,14 @@ class FakeSender:
     def __init__(self):
         self.sent = []
         self.reactions = []
+        self.replies = []
 
     async def typing(self, chat_id, persona):
         pass
 
-    async def send(self, chat_id, persona, text):
+    async def send(self, chat_id, persona, text, reply_to=None):
         self.sent.append((persona, text))
+        self.replies.append(reply_to)
         return 1000 + len(self.sent)
 
     async def react(self, chat_id, persona, message_id, emoji):
@@ -167,7 +169,9 @@ async def test_mentioned_persona_answers_once(setup):
 
 def plan(*actions, meaning="m", quiet=0):
     return {"meaning": meaning, "quiet_minutes": quiet, "plan": [
-        {"who": who, "action": kind, "emoji": emoji, "intent": intent} for who, kind, emoji, intent in actions
+        {"who": who, "action": kind, "emoji": emoji, "intent": intent, "reply_to": reply_to}
+        for who, kind, emoji, intent, *rest in actions
+        for reply_to in [rest[0] if rest else 0]
     ]}
 
 
@@ -239,9 +243,9 @@ async def test_new_user_message_interrupts_round(setup):
     llm.plans = [plan(("klod", "text", "", "a"), ("chaty", "text", "", "b"))]
     original_send = sender.send
 
-    async def send_and_user_types(chat_id, persona, text):
+    async def send_and_user_types(chat_id, persona, text, reply_to=None):
         engine._pending.setdefault(chat_id, []).append("нове повідомлення")
-        return await original_send(chat_id, persona, text)
+        return await original_send(chat_id, persona, text, reply_to)
 
     sender.send = send_and_user_types
     await engine.on_user_message(1, "йо", 5, None, "Ден")
@@ -255,3 +259,13 @@ async def test_second_speaker_is_told_to_be_brief(setup):
     await engine.on_user_message(1, "йо", 5, None, "Ден")
     await asyncio.sleep(0.2)
     assert "жарт. Коротко, одним повідомленням." in llm.calls[1][2]
+
+
+async def test_reply_to_known_message_only(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("klod", "text", "", "про перше", 10), ("chaty", "text", "", "x", 999))]
+    await engine.on_user_message(1, "перше", 10, None, "Ден")
+    await engine.on_user_message(1, "друге", 11, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert sender.replies == [10, None]  # 999 нема в історії — reply прибрано
+    assert "#10 " in llm.director_prompts[0][1]

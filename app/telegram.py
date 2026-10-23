@@ -11,7 +11,7 @@ from aiogram import Bot, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message as TgMessage
-from aiogram.types import ReactionTypeEmoji
+from aiogram.types import ReactionTypeEmoji, ReplyParameters
 
 from .config import Config
 from .db import Database
@@ -28,8 +28,15 @@ class TelegramSender:
     async def typing(self, chat_id: int, persona: Persona) -> None:
         await self.bots[persona].send_chat_action(chat_id, ChatAction.TYPING)
 
-    async def send(self, chat_id: int, persona: Persona, text: str) -> int:
-        sent = await self.bots[persona].send_message(chat_id, text)
+    async def send(
+        self, chat_id: int, persona: Persona, text: str, reply_to: int | None = None
+    ) -> int:
+        reply = (
+            ReplyParameters(message_id=reply_to, allow_sending_without_reply=True)
+            if reply_to
+            else None
+        )
+        sent = await self.bots[persona].send_message(chat_id, text, reply_parameters=reply)
         return sent.message_id
 
     async def react(self, chat_id: int, persona: Persona, message_id: int, emoji: str) -> None:

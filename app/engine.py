@@ -7,6 +7,7 @@ import asyncio
 import logging
 import random
 import time as clock_time
+from dataclasses import replace
 from datetime import datetime, time, timedelta
 from typing import Callable, Protocol
 from zoneinfo import ZoneInfo
@@ -36,7 +37,9 @@ def typing_seconds(text: str) -> float:
 class Sender(Protocol):
     async def typing(self, chat_id: int, persona: Persona) -> None: ...
 
-    async def send(self, chat_id: int, persona: Persona, text: str) -> int: ...
+    async def send(
+        self, chat_id: int, persona: Persona, text: str, reply_to: int | None = None
+    ) -> int: ...
 
     async def react(self, chat_id: int, persona: Persona, message_id: int, emoji: str) -> None: ...
 
@@ -196,9 +199,16 @@ class Engine:
         now = self.clock().astimezone(self.tz)
         prompt = (
             f"Зараз {now:%A %H:%M}.\n\nІсторія чату:\n\n"
-            f"{render_history(history, self.user_name, self.tz)}\n\n{task}"
+            f"{render_history(history, self.user_name, self.tz, with_ids=True)}\n\n{task}"
         )
+        known_ids = {m.tg_id for m in history if m.tg_id}
         plan = director.parse_plan(await self.llm.direct(system, prompt, director.PLAN_SCHEMA))
+        # Номер, якого нема в історії, — вигадка моделі: прибираємо reply.
+        plan = Plan(
+            plan.meaning,
+            [a if a.reply_to in known_ids else replace(a, reply_to=0) for a in plan.actions],
+            plan.quiet_minutes,
+        )
         log.info("plan: %s | %s | quiet=%s", plan.meaning, plan.actions, plan.quiet_minutes)
         return plan
 
@@ -211,7 +221,7 @@ class Engine:
                 return
             action = queue.pop(0)
             if action.kind == "reaction":
-                await self._react(chat_id, action, target_message)
+                await self._react(chat_id, action, action.reply_to or target_message)
                 continue
             intent = action.intent
             if spoken:
@@ -220,7 +230,7 @@ class Engine:
                 if self._interrupted(chat_id):
                     return
                 intent = (intent + ". " if intent else "") + "Коротко, одним повідомленням."
-            text = await self._speak(chat_id, action.who, plan.meaning, intent)
+            text = await self._speak(chat_id, action.who, plan.meaning, intent, action.reply_to or None)
             spoken.append(action.who)
             # Звернувся до іншого персонажа на ім'я — той відповідає (один раз за раунд).
             other = director.other(action.who)
@@ -240,7 +250,14 @@ class Engine:
             return
         await self.db.add_message(chat_id, action.who, f"[реакція {action.emoji}]")
 
-    async def _speak(self, chat_id: int, persona: Persona, meaning: str = "", intent: str = "") -> str | None:
+    async def _speak(
+        self,
+        chat_id: int,
+        persona: Persona,
+        meaning: str = "",
+        intent: str = "",
+        reply_to: int | None = None,
+    ) -> str | None:
         """Генерує і відправляє репліку. Повертає відправлений текст (None — нічого не сказав)."""
         history = await self.db.recent(chat_id, self.history_limit)
         typing = asyncio.create_task(self._keep_typing(chat_id, persona))
@@ -259,7 +276,8 @@ class Engine:
                     await asyncio.sleep(wait)
                 if self._interrupted(chat_id) and sent:
                     break
-                tg_id = await self.sender.send(chat_id, persona, part)
+                # reply тільки на першій частині, як у людей
+                tg_id = await self.sender.send(chat_id, persona, part, reply_to if i == 0 else None)
                 await self.db.add_message(chat_id, persona, part, tg_id)
                 sent.append(part)
             return " ".join(sent) or None
