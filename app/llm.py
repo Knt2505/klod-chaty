@@ -1,5 +1,6 @@
 import base64
 import logging
+import time
 
 import anthropic
 import openai
@@ -25,9 +26,13 @@ class LLM:
         self, persona: Persona, system: str, prompt: str, images: list[bytes]
     ) -> str:
         encoded = [base64.standard_b64encode(image).decode("ascii") for image in images]
+        started = time.monotonic()
         if persona == "klod":
-            return await self._claude(system, prompt, encoded)
-        return await self._gpt(system, prompt, encoded)
+            text = await self._claude(system, prompt, encoded)
+        else:
+            text = await self._gpt(system, prompt, encoded)
+        log.info("%s answered in %.1fs", persona, time.monotonic() - started)
+        return text
 
     async def _claude(self, system: str, prompt: str, images: list[str]) -> str:
         content = [
@@ -39,6 +44,8 @@ class LLM:
             model=self.cfg.klod_model,
             max_tokens=MAX_OUTPUT_TOKENS,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            # Для чату thinking не потрібен — без нього відповідь у рази швидша.
+            thinking={"type": "disabled"},
             output_config={"effort": "low"},
             messages=[{"role": "user", "content": content}],
         )

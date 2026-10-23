@@ -109,30 +109,47 @@ class Engine:
 
     async def _speak(self, chat_id: int, persona: Persona) -> None:
         history = await self.db.recent(chat_id, self.history_limit)
-        await self.sender.typing(chat_id, persona)
+        typing = asyncio.create_task(self._keep_typing(chat_id, persona))
+        try:
+            raw = await self._generate(chat_id, persona, history)
+        finally:
+            typing.cancel()
+        if raw is None:
+            return
+        for i, part in enumerate(humanize(clean_reply(raw))):
+            if i:
+                await self.sender.typing(chat_id, persona)
+                await asyncio.sleep(min(0.6 + len(part) / 60, 2.5) * self.typing_pace)
+            tg_id = await self.sender.send(chat_id, persona, part)
+            await self.db.add_message(chat_id, persona, part, tg_id)
+
+    async def _keep_typing(self, chat_id: int, persona: Persona) -> None:
+        """«друкує…» в Telegram гасне через ~5 с, тому оновлюємо його, поки модель думає."""
+        while True:
+            try:
+                await self.sender.typing(chat_id, persona)
+            except Exception:
+                log.warning("typing action failed", exc_info=True)
+            await asyncio.sleep(4)
+
+    async def _generate(self, chat_id: int, persona: Persona, history: list[Message]) -> str | None:
         attached, images = await self._recent_images(history)
         system = system_prompt(persona, self.user_name)
         try:
-            raw = await self.llm.generate(
+            return await self.llm.generate(
                 persona, system, build_prompt(persona, history, self.user_name, self.tz, attached), images
             )
         except Exception:
             log.exception("generation failed for %s (images: %d)", persona, len(images))
             if not images:
-                return
+                return None
             try:
-                raw = await self.llm.generate(
+                return await self.llm.generate(
                     persona, system, build_prompt(persona, history, self.user_name, self.tz), []
                 )
             except Exception:
                 log.exception("generation without images failed for %s", persona)
-                return
-        for i, part in enumerate(humanize(clean_reply(raw))):
-            if i:
-                await self.sender.typing(chat_id, persona)
-                await asyncio.sleep(min(1 + len(part) / 40, 4) * self.typing_pace)
-            tg_id = await self.sender.send(chat_id, persona, part)
-            await self.db.add_message(chat_id, persona, part, tg_id)
+                return None
 
     async def _recent_images(self, history: list[Message]) -> tuple[list[str], list[bytes]]:
         """Останні фото з історії, які персонаж «бачить» (file_id по порядку і їхні байти)."""
