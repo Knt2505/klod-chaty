@@ -47,10 +47,10 @@ def load_config() -> Config:
         klod_model=os.getenv("KLOD_MODEL", "claude-haiku-5-5"),
         director_model=os.getenv("DIRECTOR_MODEL", "claude-haiku-5-5"),
         chaty_model=os.getenv("CHATY_MODEL", "gpt-5.4-mini"),
-        chaty_reasoning_effort=os.getenv("CHATY_REASONING_EFFORT", "none").strip() or None,
+        chaty_reasoning_effort=os.getenv("CHATY_REASONING_EFFORT", "low").strip() or None,
         db_path=os.getenv("DB_PATH", "data/klod_chaty.db"),
         timezone=os.getenv("TIMEZONE", "America/Chicago"),
-        debounce_seconds=float(os.getenv("DEBOUNCE_SECONDS", "3")),
+        debounce_seconds=float(os.getenv("DEBOUNCE_SECONDS", "6")),
         history_limit=int(os.getenv("HISTORY_LIMIT", "30")),
         nudge_minutes=float(os.getenv("NUDGE_MINUTES", "5")),
     )

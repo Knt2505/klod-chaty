@@ -116,7 +116,7 @@ def test_humanize():
     text = "Клод тут. Чаті, не мовчи.\n\nДен, \"імба\" щодо чого? Скажи що."
     assert humanize(text) == ["клод тут. чаті, не мовчи", "ден, \"імба\" щодо чого? скажи що"]
     assert humanize("ПОВАЖАЮ. API впало...") == ["ПОВАЖАЮ. API впало..."]
-    assert humanize("а\n\nб\n\nв\n\nг") == ["а", "б", "в г"]
+    assert humanize("а\n\nб\n\nв\n\nг") == ["а", "б в г"]
     assert humanize("рядок\nще рядок") == ["рядок ще рядок"]
 
 
@@ -231,3 +231,26 @@ async def test_rules_reach_prompts(setup):
     assert "1. не допитуйся" in llm.calls[0][1]
     assert "1. не допитуйся" in llm.director_prompts[0][0]
     assert await db.delete_rule(1) == "не допитуйся" and await db.rules() == []
+
+
+async def test_new_user_message_interrupts_round(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("klod", "text", "", "a"), ("chaty", "text", "", "b"))]
+    original_send = sender.send
+
+    async def send_and_user_types(chat_id, persona, text):
+        engine._pending.setdefault(chat_id, []).append("нове повідомлення")
+        return await original_send(chat_id, persona, text)
+
+    sender.send = send_and_user_types
+    await engine.on_user_message(1, "йо", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert [p for p, _ in sender.sent] == ["klod"]  # Чаті не встряв, бо Ден пише далі
+
+
+async def test_second_speaker_is_told_to_be_brief(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("klod", "text", "", "a"), ("chaty", "text", "", "жарт"))]
+    await engine.on_user_message(1, "йо", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert "жарт. Коротко, одним повідомленням." in llm.calls[1][2]

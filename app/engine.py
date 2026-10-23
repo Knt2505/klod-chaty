@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import random
+import time as clock_time
 from datetime import datetime, time, timedelta
 from typing import Callable, Protocol
 from zoneinfo import ZoneInfo
@@ -24,6 +25,12 @@ MAX_IMAGES = 2
 IMAGE_CACHE_SIZE = 10
 NIGHT_START = time(1, 0)  # «написати першим» після живої розмови ок і пізно ввечері
 NIGHT_END = time(6, 30)
+BETWEEN_SPEAKERS = (3.0, 6.0)  # секунд паузи, перш ніж другий персонаж почне писати
+
+
+def typing_seconds(text: str) -> float:
+    """Скільки людина набирала б це повідомлення (з межами, щоб не тягнути вічність)."""
+    return min(1.5 + len(text) / 25, 7.0)
 
 
 class Sender(Protocol):
@@ -199,11 +206,21 @@ class Engine:
         queue = list(plan.actions)
         spoken: list[Persona] = []
         while queue:
+            if self._interrupted(chat_id):
+                log.info("chat %s: user wrote again, dropping %d planned actions", chat_id, len(queue))
+                return
             action = queue.pop(0)
             if action.kind == "reaction":
                 await self._react(chat_id, action, target_message)
                 continue
-            text = await self._speak(chat_id, action.who, plan.meaning, action.intent)
+            intent = action.intent
+            if spoken:
+                # Другий у раунді: спершу «читає» відповідь першого, і пише коротко.
+                await asyncio.sleep(self.rng.uniform(*BETWEEN_SPEAKERS) * self.typing_pace)
+                if self._interrupted(chat_id):
+                    return
+                intent = (intent + ". " if intent else "") + "Коротко, одним повідомленням."
+            text = await self._speak(chat_id, action.who, plan.meaning, intent)
             spoken.append(action.who)
             # Звернувся до іншого персонажа на ім'я — той відповідає (один раз за раунд).
             other = director.other(action.who)
@@ -227,20 +244,27 @@ class Engine:
         """Генерує і відправляє репліку. Повертає відправлений текст (None — нічого не сказав)."""
         history = await self.db.recent(chat_id, self.history_limit)
         typing = asyncio.create_task(self._keep_typing(chat_id, persona))
+        started = clock_time.monotonic()
         try:
             raw = await self._generate(persona, history, meaning, intent)
+            if raw is None:
+                return None
+            sent = []
+            for i, part in enumerate(humanize(clean_reply(raw))):
+                # Час «набору» як у людини; для першої частини враховуємо, скільки модель уже думала.
+                wait = typing_seconds(part) * self.typing_pace
+                if i == 0:
+                    wait -= clock_time.monotonic() - started
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                if self._interrupted(chat_id) and sent:
+                    break
+                tg_id = await self.sender.send(chat_id, persona, part)
+                await self.db.add_message(chat_id, persona, part, tg_id)
+                sent.append(part)
+            return " ".join(sent) or None
         finally:
             typing.cancel()
-        if raw is None:
-            return None
-        parts = humanize(clean_reply(raw))
-        for i, part in enumerate(parts):
-            if i:
-                await self.sender.typing(chat_id, persona)
-                await asyncio.sleep(min(0.6 + len(part) / 60, 2.5) * self.typing_pace)
-            tg_id = await self.sender.send(chat_id, persona, part)
-            await self.db.add_message(chat_id, persona, part, tg_id)
-        return " ".join(parts) or None
 
     async def _keep_typing(self, chat_id: int, persona: Persona) -> None:
         """«друкує…» в Telegram гасне через ~5 с, тому оновлюємо його, поки модель думає."""
@@ -294,6 +318,10 @@ class Engine:
         return attached, images
 
     # --- допоміжне -----------------------------------------------------------
+
+    def _interrupted(self, chat_id: int) -> bool:
+        """Користувач написав щось нове — поточний раунд згортаємо, відповімо на нове."""
+        return bool(self._pending.get(chat_id))
 
     def _lock(self, chat_id: int) -> asyncio.Lock:
         return self._locks.setdefault(chat_id, asyncio.Lock())

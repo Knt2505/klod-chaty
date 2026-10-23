@@ -40,9 +40,9 @@ class LLM:
         started = time.monotonic()
         response = await self.anthropic.messages.create(
             model=self.cfg.director_model,
-            max_tokens=1000,
+            max_tokens=4000,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            thinking={"type": "disabled"},
+            thinking={"type": "adaptive"},
             output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": prompt}],
         )
@@ -61,9 +61,9 @@ class LLM:
             model=self.cfg.klod_model,
             max_tokens=MAX_OUTPUT_TOKENS,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            # Для чату thinking не потрібен — без нього відповідь у рази швидша.
-            thinking={"type": "disabled"},
-            output_config={"effort": "low"},
+            # Коротке обдумування (adaptive) помітно краще розуміє контекст і сленг.
+            thinking={"type": "adaptive"},
+            output_config={"effort": "medium"},
             messages=[{"role": "user", "content": content}],
         )
         log.info("claude usage: %s", response.usage)

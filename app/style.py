@@ -2,7 +2,7 @@
 
 import re
 
-MAX_PARTS = 3
+MAX_PARTS = 2
 
 _PARAGRAPHS = re.compile(r"\n\s*\n")
 # Початок повідомлення або початок речення після . ! ? …

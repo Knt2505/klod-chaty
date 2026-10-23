@@ -161,6 +161,13 @@ def build_router(
             return
         await message.reply(f"прибрав: {removed}")
 
+    @router.message(Command("forget", "забудь"))
+    async def forget(message: TgMessage) -> None:
+        if not allowed(message):
+            return
+        await db.clear_chat(message.chat.id)
+        await message.reply("все, чистий аркуш. попередню переписку ми не пам'ятаємо")
+
     @router.message(Command("ids"))
     async def show_ids(message: TgMessage) -> None:
         user_id = message.from_user.id if message.from_user else "?"

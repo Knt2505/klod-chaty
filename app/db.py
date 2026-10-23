@@ -126,3 +126,7 @@ class Database:
         await self.conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
         await self.conn.commit()
         return text
+
+    async def clear_chat(self, chat_id: int) -> None:
+        await self.conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+        await self.conn.commit()
