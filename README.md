@@ -32,7 +32,7 @@ Telegram-група з двома AI-друзями. Повна специфік
 ### 5. Встановлення однією командою
 На сервері встав:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/klod-chaty/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Knt2505/klod-chaty/main/setup.sh | bash
 ```
 Скрипт сам встановить Docker, завантажить код, спитає 2 токени і 2 ключі та запустить ботів.
 

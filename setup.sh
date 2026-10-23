@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Встановлення Клода і Чаті на чистий Ubuntu-сервер однією командою:
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/klod-chaty/main/setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Knt2505/klod-chaty/main/setup.sh | bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/OWNER/klod-chaty.git}"
+REPO_URL="${REPO_URL:-https://github.com/Knt2505/klod-chaty.git}"
 DIR="${DIR:-$HOME/klod-chaty}"
 
 ask() {  # ask <змінна> <питання> [secret]
