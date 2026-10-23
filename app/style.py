@@ -7,6 +7,7 @@ MAX_PARTS = 5
 MAX_PART_LENGTH = 50  # довше — можна різати по реченнях на окремі повідомлення
 ALWAYS_SPLIT_LENGTH = 140  # а таке довге — ріжемо завжди
 SPLIT_CHANCE = 0.4  # як часто ділимо середні повідомлення, щоб не було шаблонно
+EMOJI_CHANCE = 0.15  # друзі Дена ставлять емодзі в ~4% повідомлень, тож рідко
 
 _PARAGRAPHS = re.compile(r"\n\s*\n")
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
@@ -98,7 +99,7 @@ _EMOJI = re.compile(
 
 def limit_emoji(parts: list[str], max_emoji: int, rng: random.Random | None = None) -> list[str]:
     """Залишає не більше max_emoji емодзі на всю відповідь (і то не завжди)."""
-    keep = max_emoji if rng is None or rng.random() < 0.5 else 0
+    keep = max_emoji if rng is None or rng.random() < EMOJI_CHANCE else 0
     result = []
     for part in parts:
 
