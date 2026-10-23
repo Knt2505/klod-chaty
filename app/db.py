@@ -139,13 +139,26 @@ class Database:
         await self.conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         await self.conn.commit()
 
-    async def bot_message(self, chat_id: int, tg_id: int) -> tuple[str, str, str] | None:
-        """(персонаж, текст, останнє повідомлення користувача перед ним) за id повідомлення бота."""
+    async def bot_message(
+        self, chat_id: int, tg_id: int, persona: str | None = None, text: str | None = None
+    ) -> tuple[str, str, str] | None:
+        """(персонаж, текст, останнє повідомлення користувача перед ним) за id повідомлення бота.
+
+        У звичайних (не супер-) групах кожен бот бачить свої номери повідомлень, тому
+        якщо за id не знайшли — шукаємо останнє повідомлення цього персонажа з таким текстом.
+        """
         cursor = await self.conn.execute(
             "SELECT id, author, text FROM messages WHERE chat_id = ? AND tg_id = ? AND author != 'user'",
             (chat_id, tg_id),
         )
         row = await cursor.fetchone()
+        if row is None and persona and text:
+            cursor = await self.conn.execute(
+                "SELECT id, author, text FROM messages WHERE chat_id = ? AND author = ? AND text = ?"
+                " ORDER BY id DESC LIMIT 1",
+                (chat_id, persona, text),
+            )
+            row = await cursor.fetchone()
         if row is None:
             return None
         row_id, author, text = row

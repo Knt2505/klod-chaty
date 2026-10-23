@@ -323,3 +323,12 @@ def test_drop_drafts_and_emoji():
     assert limit_emoji(["та я тут 😌", "ну ок 🔥😎"], 1) == ["та я тут 😌", "ну ок"]
     assert limit_emoji(["спокій 😌"], 0) == ["спокій"]
     assert limit_emoji(["❤️‍🔥"], 0) == []
+
+
+async def test_bot_message_found_by_text_when_ids_differ(setup):
+    engine, db, llm, sender = setup
+    await db.add_message(1, "user", "а чо він дід", 5)
+    await db.add_message(1, "chaty", "та я з лавки, але на звязку", 40)
+    assert await db.bot_message(1, 999) is None
+    found = await db.bot_message(1, 999, "chaty", "та я з лавки, але на звязку")
+    assert found == ("chaty", "та я з лавки, але на звязку", "а чо він дід")

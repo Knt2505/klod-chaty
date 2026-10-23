@@ -172,7 +172,14 @@ def build_router(
         if not allowed(message):
             return
         original = message.reply_to_message
-        found = await db.bot_message(message.chat.id, original.message_id) if original else None
+        found = None
+        if original and original.from_user:
+            found = await db.bot_message(
+                message.chat.id,
+                original.message_id,
+                bot_ids.get(original.from_user.id),
+                original.text,
+            )
         if found is None:
             await message.reply("зроби це reply на повідомлення Клода чи Чаті")
             return
