@@ -1,6 +1,7 @@
 """Картки персонажів і спільні правила поведінки."""
 
-from .models import Persona
+from .examples import base_examples, learned_examples
+from .models import DISPLAY_NAMES, Persona
 
 COMMON_RULES = """\
 Ти в Telegram-групі з трьома учасниками: {user_name} (людина), Клод і Чаті (ви двоє — AI-друзі {user_name}).
@@ -97,6 +98,20 @@ def rules_block(rules: list[str], user_name: str) -> str:
     return f"\nОсобисті правила від {user_name} (виконуй завжди, вони важливіші за інші):\n{lines}\n"
 
 
-def system_prompt(persona: Persona, user_name: str, rules: list[str] = ()) -> str:
+def system_prompt(
+    persona: Persona,
+    user_name: str,
+    rules: list[str] = (),
+    good: list[tuple[str, str, str]] = (),
+    bad: list[tuple[str, str, str]] = (),
+) -> str:
     base = (_CARDS[persona] + "\n" + COMMON_RULES).format(user_name=user_name)
-    return base + rules_block(list(rules), user_name)
+    named = lambda items: [(DISPLAY_NAMES.get(p, p), c, t) for p, c, t in items]  # noqa: E731
+    learned = learned_examples(named(list(good)), named(list(bad)))
+    return (
+        base
+        + "\n"
+        + base_examples(user_name)
+        + (f"\n{learned}\n" if learned else "")
+        + rules_block(list(rules), user_name)
+    )

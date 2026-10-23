@@ -291,3 +291,21 @@ def test_humanize_splits_only_sometimes_with_rng():
     assert humanize(text, never) == ["ок, це вже норм тема. давай спробуємо завтра зранку"]
     very_long = "дуже довге речення про все на світі і ще трохи. " * 4
     assert len(humanize(very_long, never)) > 1
+
+
+async def test_marked_examples_reach_prompt(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("chaty", "text", "", "x"))]
+    await engine.on_user_message(1, "йо", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    tg_id = 1001  # FakeSender нумерує відправлені з 1001
+    assert await db.bot_message(1, tg_id) == ("chaty", "відповідь 1", "йо")
+    await db.add_example("bad", "chaty", "йо", "відповідь 1")
+    await db.add_example("good", "klod", "ок", "ну ок")
+    llm.plans = [plan(("klod", "text", "", "x"))]
+    await engine.on_user_message(1, "ще", 6, None, "Ден")
+    await asyncio.sleep(0.2)
+    system = llm.calls[-1][1]
+    assert "КРИНЖ" in system and "- Чаті на «йо» → «відповідь 1»" in system
+    assert "- Клод на «ок» → «ну ок»" in system
+    assert "Приклади живого чату" in system and "Ден: йо" in system

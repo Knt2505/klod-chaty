@@ -23,6 +23,7 @@ from .transcript import build_prompt, clean_reply, render_history
 log = logging.getLogger(__name__)
 
 MAX_IMAGES = 2
+LEARNED_EXAMPLES = 20  # скільки останніх /топ і /кринж класти в промпт
 IMAGE_CACHE_SIZE = 10
 NIGHT_START = time(1, 0)  # «написати першим» після живої розмови ок і пізно ввечері
 NIGHT_END = time(6, 30)
@@ -297,7 +298,13 @@ class Engine:
         self, persona: Persona, history: list[Message], meaning: str, intent: str
     ) -> str | None:
         attached, images = await self._recent_images(history)
-        system = system_prompt(persona, self.user_name, await self.db.rules())
+        system = system_prompt(
+            persona,
+            self.user_name,
+            await self.db.rules(),
+            await self.db.examples("good", LEARNED_EXAMPLES),
+            await self.db.examples("bad", LEARNED_EXAMPLES),
+        )
 
         def prompt(with_images: list[str]) -> str:
             return build_prompt(

@@ -168,6 +168,29 @@ def build_router(
             return
         await message.reply(f"прибрав: {removed}")
 
+    async def mark_example(message: TgMessage, kind: str) -> None:
+        if not allowed(message):
+            return
+        original = message.reply_to_message
+        found = await db.bot_message(message.chat.id, original.message_id) if original else None
+        if found is None:
+            await message.reply("зроби це reply на повідомлення Клода чи Чаті")
+            return
+        persona, text, context = found
+        await db.add_example(kind, persona, context, text)
+        try:
+            await message.react([ReactionTypeEmoji(emoji="👌" if kind == "good" else "🤡")])
+        except Exception:
+            await message.reply("записав")
+
+    @router.message(Command("top", "топ"))
+    async def mark_good(message: TgMessage) -> None:
+        await mark_example(message, "good")
+
+    @router.message(Command("cringe", "кринж"))
+    async def mark_bad(message: TgMessage) -> None:
+        await mark_example(message, "bad")
+
     @router.message(Command("forget", "забудь"))
     async def forget(message: TgMessage) -> None:
         if not allowed(message):

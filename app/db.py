@@ -22,6 +22,14 @@ CREATE TABLE IF NOT EXISTS rules (
     text TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    context TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -130,3 +138,36 @@ class Database:
     async def clear_chat(self, chat_id: int) -> None:
         await self.conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         await self.conn.commit()
+
+    async def bot_message(self, chat_id: int, tg_id: int) -> tuple[str, str, str] | None:
+        """(персонаж, текст, останнє повідомлення користувача перед ним) за id повідомлення бота."""
+        cursor = await self.conn.execute(
+            "SELECT id, author, text FROM messages WHERE chat_id = ? AND tg_id = ? AND author != 'user'",
+            (chat_id, tg_id),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        row_id, author, text = row
+        cursor = await self.conn.execute(
+            "SELECT text FROM messages WHERE chat_id = ? AND id < ? AND author = 'user'"
+            " ORDER BY id DESC LIMIT 1",
+            (chat_id, row_id),
+        )
+        before = await cursor.fetchone()
+        return author, text, before[0] if before else ""
+
+    async def add_example(self, kind: str, persona: str, context: str, text: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO examples (kind, persona, context, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            (kind, persona, context, text, datetime.now(timezone.utc).isoformat()),
+        )
+        await self.conn.commit()
+
+    async def examples(self, kind: str, limit: int) -> list[tuple[str, str, str]]:
+        """Останні приклади заданого типу: (персонаж, контекст, текст), від старіших до новіших."""
+        cursor = await self.conn.execute(
+            "SELECT persona, context, text FROM examples WHERE kind = ? ORDER BY id DESC LIMIT ?",
+            (kind, limit),
+        )
+        return list(reversed(await cursor.fetchall()))
