@@ -180,6 +180,10 @@ def build_router(
                 bot_ids.get(original.from_user.id),
                 original.text,
             )
+        persona_of_original = bot_ids.get(original.from_user.id) if original and original.from_user else None
+        if found is None and persona_of_original and original.text:
+            # У базі не знайшли (інша нумерація, стерта історія) — беремо текст прямо з reply.
+            found = (persona_of_original, original.text, "")
         if found is None:
             await message.reply("зроби це reply на повідомлення Клода чи Чаті")
             return
