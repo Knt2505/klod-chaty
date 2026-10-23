@@ -12,8 +12,8 @@ class FakeLLM:
     def __init__(self):
         self.calls = []
 
-    async def generate(self, persona, system, prompt):
-        self.calls.append((persona, system, prompt))
+    async def generate(self, persona, system, prompt, images):
+        self.calls.append((persona, system, prompt, images))
         return f"{'Клод' if persona == 'klod' else 'Чаті'}: відповідь {len(self.calls)}"
 
 
@@ -27,6 +27,9 @@ class FakeSender:
     async def send(self, chat_id, persona, text):
         self.sent.append((persona, text))
         return 1000 + len(self.sent)
+
+    async def download(self, file_id):
+        return f"bytes-{file_id}".encode()
 
 
 @pytest.fixture
@@ -95,3 +98,32 @@ def test_humanize():
     assert humanize("ПОВАЖАЮ. API впало...") == ["ПОВАЖАЮ. API впало..."]
     assert humanize("а\n\nб\n\nв\n\nг") == ["а", "б", "в г"]
     assert humanize("рядок\nще рядок") == ["рядок ще рядок"]
+
+
+async def test_only_last_two_photos_are_attached(setup):
+    engine, db, llm, sender = setup
+    for i in range(3):
+        await engine.on_user_message(1, "[фото]", None, None, "Ден", image_file_id=f"p{i}")
+    await engine.on_user_message(1, "Клод, глянь", None, None, "Ден")
+    await asyncio.sleep(0.2)
+    _, _, prompt, images = llm.calls[0]
+    assert images == [b"bytes-p1", b"bytes-p2"]
+    assert "старе фото" in prompt and "фото №2, прикріплене" in prompt
+    history = await db.recent(1, 10)
+    assert history[0].image_file_id == "p0"
+
+
+async def test_retry_without_images_on_failure(setup):
+    engine, db, llm, sender = setup
+    original = llm.generate
+
+    async def flaky(persona, system, prompt, images):
+        if images:
+            raise RuntimeError("vision failed")
+        return await original(persona, system, prompt, images)
+
+    llm.generate = flaky
+    await engine.on_user_message(1, "Клод, глянь", None, None, "Ден", image_file_id="p")
+    await asyncio.sleep(0.2)
+    assert [p for p, _ in sender.sent] == ["klod"]
+    assert "прикріплене" not in llm.calls[0][2]

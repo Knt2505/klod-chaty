@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS messages (
     author TEXT NOT NULL,
     text TEXT NOT NULL,
     reply_to_author TEXT,
+    image_file_id TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
@@ -32,6 +33,9 @@ class Database:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self.path)
         await self._conn.executescript(SCHEMA)
+        columns = [row[1] for row in await self._conn.execute_fetchall("PRAGMA table_info(messages)")]
+        if "image_file_id" not in columns:
+            await self._conn.execute("ALTER TABLE messages ADD COLUMN image_file_id TEXT")
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -52,26 +56,28 @@ class Database:
         tg_id: int | None = None,
         reply_to_author: Author | None = None,
         created_at: datetime | None = None,
+        image_file_id: str | None = None,
     ) -> Message:
         created_at = created_at or datetime.now(timezone.utc)
         await self.conn.execute(
-            "INSERT INTO messages (chat_id, tg_id, author, text, reply_to_author, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (chat_id, tg_id, author, text, reply_to_author, created_at.isoformat()),
+            "INSERT INTO messages"
+            " (chat_id, tg_id, author, text, reply_to_author, image_file_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (chat_id, tg_id, author, text, reply_to_author, image_file_id, created_at.isoformat()),
         )
         await self.conn.commit()
-        return Message(author, text, created_at, tg_id, reply_to_author)
+        return Message(author, text, created_at, tg_id, reply_to_author, image_file_id)
 
     async def recent(self, chat_id: int, limit: int) -> list[Message]:
         cursor = await self.conn.execute(
-            "SELECT author, text, created_at, tg_id, reply_to_author FROM messages"
+            "SELECT author, text, created_at, tg_id, reply_to_author, image_file_id FROM messages"
             " WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
             (chat_id, limit),
         )
         rows = await cursor.fetchall()
         return [
-            Message(author, text, datetime.fromisoformat(created_at), tg_id, reply_to)
-            for author, text, created_at, tg_id, reply_to in reversed(rows)
+            Message(author, text, datetime.fromisoformat(created_at), tg_id, reply_to, image)
+            for author, text, created_at, tg_id, reply_to, image in reversed(rows)
         ]
 
     async def get_setting(self, key: str) -> str | None:

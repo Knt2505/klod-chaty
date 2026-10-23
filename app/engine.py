@@ -24,9 +24,17 @@ class Sender(Protocol):
 
     async def send(self, chat_id: int, persona: Persona, text: str) -> int: ...
 
+    async def download(self, file_id: str) -> bytes: ...
+
 
 class Generator(Protocol):
-    async def generate(self, persona: Persona, system: str, prompt: str) -> str: ...
+    async def generate(
+        self, persona: Persona, system: str, prompt: str, images: list[bytes]
+    ) -> str: ...
+
+
+MAX_IMAGES = 2
+IMAGE_CACHE_SIZE = 10
 
 
 class Engine:
@@ -54,6 +62,7 @@ class Engine:
         self._pending: dict[int, list[Message]] = {}
         self._timers: dict[int, asyncio.Task] = {}
         self._locks: dict[int, asyncio.Lock] = {}
+        self._image_cache: dict[str, bytes] = {}
 
     async def on_user_message(
         self,
@@ -62,10 +71,13 @@ class Engine:
         tg_id: int | None,
         reply_to_author: Author | None,
         user_name: str | None,
+        image_file_id: str | None = None,
     ) -> None:
         if user_name:
             self.user_name = user_name
-        msg = await self.db.add_message(chat_id, "user", text, tg_id, reply_to_author)
+        msg = await self.db.add_message(
+            chat_id, "user", text, tg_id, reply_to_author, image_file_id=image_file_id
+        )
         self._pending.setdefault(chat_id, []).append(msg)
         self._restart_timer(chat_id)
 
@@ -98,18 +110,45 @@ class Engine:
     async def _speak(self, chat_id: int, persona: Persona) -> None:
         history = await self.db.recent(chat_id, self.history_limit)
         await self.sender.typing(chat_id, persona)
+        attached, images = await self._recent_images(history)
+        system = system_prompt(persona, self.user_name)
         try:
             raw = await self.llm.generate(
-                persona,
-                system_prompt(persona, self.user_name),
-                build_prompt(persona, history, self.user_name, self.tz),
+                persona, system, build_prompt(persona, history, self.user_name, self.tz, attached), images
             )
         except Exception:
-            log.exception("generation failed for %s", persona)
-            return
+            log.exception("generation failed for %s (images: %d)", persona, len(images))
+            if not images:
+                return
+            try:
+                raw = await self.llm.generate(
+                    persona, system, build_prompt(persona, history, self.user_name, self.tz), []
+                )
+            except Exception:
+                log.exception("generation without images failed for %s", persona)
+                return
         for i, part in enumerate(humanize(clean_reply(raw))):
             if i:
                 await self.sender.typing(chat_id, persona)
                 await asyncio.sleep(min(1 + len(part) / 40, 4) * self.typing_pace)
             tg_id = await self.sender.send(chat_id, persona, part)
             await self.db.add_message(chat_id, persona, part, tg_id)
+
+    async def _recent_images(self, history: list[Message]) -> tuple[list[str], list[bytes]]:
+        """Останні фото з історії, які персонаж «бачить» (file_id по порядку і їхні байти)."""
+        file_ids = [m.image_file_id for m in history if m.image_file_id][-MAX_IMAGES:]
+        attached, images = [], []
+        for file_id in file_ids:
+            data = self._image_cache.get(file_id)
+            if data is None:
+                try:
+                    data = await self.sender.download(file_id)
+                except Exception:
+                    log.exception("could not download image %s", file_id)
+                    continue
+                if len(self._image_cache) >= IMAGE_CACHE_SIZE:
+                    self._image_cache.pop(next(iter(self._image_cache)))
+                self._image_cache[file_id] = data
+            attached.append(file_id)
+            images.append(data)
+        return attached, images

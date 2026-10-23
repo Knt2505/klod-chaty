@@ -10,7 +10,9 @@ def author_name(author: str, user_name: str) -> str:
     return user_name if author == "user" else DISPLAY_NAMES[author]
 
 
-def render_history(history: list[Message], user_name: str, tz: ZoneInfo) -> str:
+def render_history(
+    history: list[Message], user_name: str, tz: ZoneInfo, attached: list[str] = ()
+) -> str:
     lines = []
     for msg in history:
         stamp = msg.created_at.astimezone(tz).strftime("%a %H:%M")
@@ -20,11 +22,22 @@ def render_history(history: list[Message], user_name: str, tz: ZoneInfo) -> str:
             if msg.reply_to_author
             else ""
         )
-        lines.append(f"[{stamp}] {name}{reply}: {msg.text}")
+        image = ""
+        if msg.image_file_id in attached:
+            image = f" (фото №{attached.index(msg.image_file_id) + 1}, прикріплене — ти його бачиш)"
+        elif msg.image_file_id:
+            image = " (старе фото, ти його вже не бачиш)"
+        lines.append(f"[{stamp}] {name}{reply}: {msg.text}{image}")
     return "\n".join(lines)
 
 
-def build_prompt(persona: Persona, history: list[Message], user_name: str, tz: ZoneInfo) -> str:
+def build_prompt(
+    persona: Persona,
+    history: list[Message],
+    user_name: str,
+    tz: ZoneInfo,
+    attached: list[str] = (),
+) -> str:
     intro = (
         f"Ви щойно почали спілкуватися і майже нічого не знаєте про {user_name}.\n\n"
         if len(history) < NEW_ACQUAINTANCE_MESSAGES
@@ -32,7 +45,7 @@ def build_prompt(persona: Persona, history: list[Message], user_name: str, tz: Z
     )
     return (
         intro + "Останні повідомлення в груповому чаті:\n\n"
-        f"{render_history(history, user_name, tz)}\n\n"
+        f"{render_history(history, user_name, tz, attached)}\n\n"
         f"Напиши наступне повідомлення від імені {DISPLAY_NAMES[persona]}."
     )
 

@@ -1,3 +1,4 @@
+import base64
 import logging
 
 import anthropic
@@ -20,18 +21,26 @@ class LLM:
         self.openai = openai.AsyncOpenAI(api_key=cfg.openai_api_key)
         self.reasoning_effort = cfg.chaty_reasoning_effort
 
-    async def generate(self, persona: Persona, system: str, prompt: str) -> str:
+    async def generate(
+        self, persona: Persona, system: str, prompt: str, images: list[bytes]
+    ) -> str:
+        encoded = [base64.standard_b64encode(image).decode("ascii") for image in images]
         if persona == "klod":
-            return await self._claude(system, prompt)
-        return await self._gpt(system, prompt)
+            return await self._claude(system, prompt, encoded)
+        return await self._gpt(system, prompt, encoded)
 
-    async def _claude(self, system: str, prompt: str) -> str:
+    async def _claude(self, system: str, prompt: str, images: list[str]) -> str:
+        content = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
+            for data in images
+        ]
+        content.append({"type": "text", "text": prompt})
         response = await self.anthropic.messages.create(
             model=self.cfg.klod_model,
             max_tokens=MAX_OUTPUT_TOKENS,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             output_config={"effort": "low"},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
         )
         log.info("claude usage: %s", response.usage)
         if response.stop_reason == "refusal":
@@ -39,11 +48,16 @@ class LLM:
             return ""
         return "".join(block.text for block in response.content if block.type == "text").strip()
 
-    async def _gpt(self, system: str, prompt: str) -> str:
+    async def _gpt(self, system: str, prompt: str, images: list[str]) -> str:
+        content = [
+            {"type": "input_image", "detail": "low", "image_url": f"data:image/jpeg;base64,{data}"}
+            for data in images
+        ]
+        content.append({"type": "input_text", "text": prompt})
         request = {
             "model": self.cfg.chaty_model,
             "instructions": system,
-            "input": prompt,
+            "input": [{"role": "user", "content": content}],
             "max_output_tokens": MAX_OUTPUT_TOKENS,
         }
         if self.reasoning_effort:

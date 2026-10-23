@@ -16,3 +16,4 @@ class Message:
     created_at: datetime
     tg_id: int | None = None
     reply_to_author: Author | None = None
+    image_file_id: str | None = None

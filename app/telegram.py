@@ -31,6 +31,10 @@ class TelegramSender:
         sent = await self.bots[persona].send_message(chat_id, text)
         return sent.message_id
 
+    async def download(self, file_id: str) -> bytes:
+        buffer = await self.bots["klod"].download(file_id)
+        return buffer.read()
+
 
 def describe(message: TgMessage) -> str | None:
     """Текстове представлення повідомлення для історії. None — ігнорувати."""
@@ -51,7 +55,19 @@ def describe(message: TgMessage) -> str | None:
         return f"[гіфка]{caption}"
     if message.document:
         return f"[файл]{caption}"
+    if message.new_chat_title:
+        return f"[назву групи змінено на «{message.new_chat_title}»]"
+    if message.new_chat_photo:
+        return "[змінено фото групи]"
+    if message.delete_chat_photo:
+        return "[фото групи видалено]"
     return None
+
+
+def image_file_id(message: TgMessage) -> str | None:
+    """Найбільша версія фото з повідомлення (Telegram завжди віддає JPEG)."""
+    sizes = message.photo or message.new_chat_photo
+    return sizes[-1].file_id if sizes else None
 
 
 @dataclass
@@ -138,6 +154,7 @@ def build_router(
             message.message_id,
             reply_to,
             message.from_user.first_name if message.from_user else None,
+            image_file_id(message),
         )
 
     return router
