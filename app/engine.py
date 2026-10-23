@@ -102,12 +102,21 @@ class Engine:
         if not pending:
             return
         history = await self.db.recent(chat_id, self.history_limit)
-        speakers = director.decide(history, pending, self.rng)
-        log.info("chat %s: speakers %s", chat_id, speakers)
-        for persona in speakers:
-            await self._speak(chat_id, persona)
+        queue = director.decide(history, pending, self.rng)
+        log.info("chat %s: speakers %s", chat_id, queue)
+        spoken: list[Persona] = []
+        while queue:
+            persona = queue.pop(0)
+            text = await self._speak(chat_id, persona)
+            spoken.append(persona)
+            # Звернувся до іншого персонажа на ім'я — той відповідає (один раз за раунд).
+            other = director.other(persona)
+            if text and other not in spoken and other not in queue and other in director.mentioned(text):
+                log.info("chat %s: %s called %s", chat_id, persona, other)
+                queue.append(other)
 
-    async def _speak(self, chat_id: int, persona: Persona) -> None:
+    async def _speak(self, chat_id: int, persona: Persona) -> str | None:
+        """Генерує і відправляє репліку. Повертає відправлений текст (None — нічого не сказав)."""
         history = await self.db.recent(chat_id, self.history_limit)
         typing = asyncio.create_task(self._keep_typing(chat_id, persona))
         try:
@@ -115,13 +124,15 @@ class Engine:
         finally:
             typing.cancel()
         if raw is None:
-            return
-        for i, part in enumerate(humanize(clean_reply(raw))):
+            return None
+        parts = humanize(clean_reply(raw))
+        for i, part in enumerate(parts):
             if i:
                 await self.sender.typing(chat_id, persona)
                 await asyncio.sleep(min(0.6 + len(part) / 60, 2.5) * self.typing_pace)
             tg_id = await self.sender.send(chat_id, persona, part)
             await self.db.add_message(chat_id, persona, part, tg_id)
+        return " ".join(parts) or None
 
     async def _keep_typing(self, chat_id: int, persona: Persona) -> None:
         """«друкує…» в Telegram гасне через ~5 с, тому оновлюємо його, поки модель думає."""

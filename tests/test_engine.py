@@ -127,3 +127,18 @@ async def test_retry_without_images_on_failure(setup):
     await asyncio.sleep(0.2)
     assert [p for p, _ in sender.sent] == ["klod"]
     assert "прикріплене" not in llm.calls[0][2]
+
+
+async def test_mentioned_persona_answers_once(setup):
+    engine, db, llm, sender = setup
+    replies = iter(["чаті, а ти шо думаєш?", "клод, я думаю нормально", "ще щось"])
+
+    async def scripted(persona, system, prompt, images):
+        llm.calls.append(persona)
+        return next(replies)
+
+    llm.generate = scripted
+    await engine.on_user_message(1, "Клод, привіт", None, None, "Ден")
+    await asyncio.sleep(0.2)
+    # Клод покликав Чаті — той відповів; Чаті згадав Клода, але Клод уже говорив у цьому раунді.
+    assert [p for p, _ in sender.sent] == ["klod", "chaty"]
