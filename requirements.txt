@@ -1,0 +1,5 @@
+aiogram==3.31.0
+anthropic==2.1.0
+openai==3.37.0
+aiosqlite==0.22.1
+python-dotenv==1.2.4
