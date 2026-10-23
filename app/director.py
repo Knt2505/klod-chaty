@@ -1,10 +1,11 @@
-"""Режисер, етап 1: прості правила, хто відповідає.
+"""Режисер: хто, як і чи взагалі реагує.
 
-На етапі 3 його замінить LLM-режисер (вклинювання, реакції, мовчання).
+Основний — LLM-режисер (plan). Прості правила (decide) — запасний варіант.
 """
 
 import random
 import re
+from dataclasses import dataclass
 
 from .models import Message, Persona
 
@@ -53,3 +54,100 @@ def decide(
     if rng.random() < SWITCH_CHANCE:
         return [other(last_bot)]
     return [last_bot]
+
+
+# ---------------------------------------------------------------------------
+# LLM-режисер: розуміє сенс і планує реакцію (текст / емодзі / тиша).
+# ---------------------------------------------------------------------------
+
+# Лише стандартні реакції Telegram, які доступні в групах без Premium.
+REACTIONS = ("👍", "❤", "🔥", "🤣", "😁", "🤔", "👀", "💯", "🫡", "🤝", "😢", "🙏", "👌", "😎", "🗿", "🤯", "🎉", "🥱", "😴", "🤡", "❤‍🔥")
+MAX_ACTIONS = 2
+DEFAULT_QUIET_MINUTES = 180
+
+
+@dataclass(frozen=True)
+class Action:
+    who: Persona
+    kind: str  # "text" | "reaction"
+    emoji: str = ""
+    intent: str = ""
+
+
+@dataclass(frozen=True)
+class Plan:
+    meaning: str
+    actions: list[Action]
+    quiet_minutes: int = 0
+
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "meaning": {"type": "string"},
+        "plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "who": {"type": "string", "enum": ["klod", "chaty"]},
+                    "action": {"type": "string", "enum": ["text", "reaction"]},
+                    "emoji": {"type": "string", "enum": ["", *REACTIONS]},
+                    "intent": {"type": "string"},
+                },
+                "required": ["who", "action", "emoji", "intent"],
+                "additionalProperties": False,
+            },
+        },
+        "quiet_minutes": {"type": "integer"},
+    },
+    "required": ["meaning", "plan", "quiet_minutes"],
+    "additionalProperties": False,
+}
+
+DIRECTOR_SYSTEM = """\
+Ти режисер групового Telegram-чату. Учасники: {user_name} (людина), Клод і Чаті (AI-друзі {user_name}).
+Клод — спокійний чесний друг-наставник, сухий гумор. Чаті — енергійний бро, жарти, підтримка.
+Ти НЕ пишеш репліки. Ти вирішуєш, хто і як реагує, щоб чат був схожий на живий чат друзів.
+
+Поверни JSON:
+- meaning: що {user_name} насправді мав на увазі, одним реченням (з урахуванням контексту).
+- plan: 0–2 дії по черзі. Дія: who (klod/chaty), action (text — написати повідомлення, reaction — поставити емодзі на останнє повідомлення {user_name}), emoji (тільки для reaction, інакше ""), intent (для text: коротко, що сказати по суті, не готовий текст; для reaction: "").
+- quiet_minutes: якщо {user_name} просить не заважати / дати спокій / тишу — на скільки хвилин (не вказано — {default_quiet}, «до ранку/завтра» — до 8:00). Інакше 0.
+
+Як вирішувати:
+- Короткі повідомлення («нарешті», «ок», «хаха», «імба», «жиза») — це реакція на те, що щойно сталося. Зрозумій на що саме.
+- Відповідає той, до кого звернулися (ім'я, reply), або той, на чию репліку це реакція, або з ким зараз іде розмова.
+- Зазвичай відповідає ОДИН. Другий — тільки якщо має реально цікаве додати (інша думка, влучний жарт).
+- Якщо тексту не треба (ок, 👍, хаха, дякую, добраніч після прощання) — краще одна reaction або порожній plan.
+- Прохання про тишу — максимум reaction 👌 або 🫡 і quiet_minutes.
+- Не допитуватися: intent ніколи не має бути «попросити пояснити».
+{rules}"""
+
+NUDGE_TASK = """\
+{user_name} мовчить уже {minutes} хв після останнього повідомлення Клода/Чаті.
+Режим «написати першим»: вирішити, чи хтось із них напише щось сам.
+- Пиши тільки якщо є природний привід: тема не закрита, можна підхопити жарт, перекинутися фразою між собою, легко продовжити розмову.
+- Якщо розмова логічно завершилась (попрощались, «ок», все сказано) — plan порожній.
+- Не докоряти за мовчання, не питати «ти тут?».
+- Максимум одна дія типу text (reaction тут не використовуй). quiet_minutes = 0."""
+
+REPLY_TASK = "Нові повідомлення {user_name}, на які треба відреагувати, — в кінці історії."
+
+
+def parse_plan(data: dict) -> Plan:
+    actions = []
+    for item in data.get("plan", [])[:MAX_ACTIONS]:
+        who, kind = item.get("who"), item.get("action")
+        if who not in ("klod", "chaty") or kind not in ("text", "reaction"):
+            continue
+        emoji = item.get("emoji", "")
+        if kind == "reaction" and emoji not in REACTIONS:
+            continue
+        actions.append(Action(who, kind, emoji, item.get("intent", "")))
+    return Plan(data.get("meaning", ""), actions, max(0, int(data.get("quiet_minutes", 0) or 0)))
+
+
+def fallback_plan(history: list[Message], pending: list[Message], rng: random.Random | None = None) -> Plan:
+    """Простий план за правилами — якщо LLM-режисер недоступний."""
+    return Plan("", [Action(p, "text") for p in decide(history, pending, rng)])

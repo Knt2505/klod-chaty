@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 from aiogram import Bot, Router
 from aiogram.enums import ChatAction
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message as TgMessage
+from aiogram.types import ReactionTypeEmoji
 
 from .config import Config
 from .db import Database
@@ -30,6 +31,11 @@ class TelegramSender:
     async def send(self, chat_id: int, persona: Persona, text: str) -> int:
         sent = await self.bots[persona].send_message(chat_id, text)
         return sent.message_id
+
+    async def react(self, chat_id: int, persona: Persona, message_id: int, emoji: str) -> None:
+        await self.bots[persona].set_message_reaction(
+            chat_id, message_id, reaction=[ReactionTypeEmoji(emoji=emoji)]
+        )
 
     async def download(self, file_id: str) -> bytes:
         buffer = await self.bots["klod"].download(file_id)
@@ -121,6 +127,39 @@ def build_router(
         await binding.save(db, message.chat.id, message.from_user.id)
         log.info("bound to chat %s, owner %s", binding.chat_id, binding.owner_id)
         await message.reply("готово, ми на місці. тепер це наш чат 🤝")
+
+    @router.message(Command("rule", "правило"))
+    async def add_rule(message: TgMessage, command: CommandObject) -> None:
+        if not allowed(message):
+            return
+        text = (command.args or "").strip()
+        if not text:
+            await message.reply("напиши правило після команди, наприклад:\n/правило не допитуйся, якщо я пишу коротко")
+            return
+        number = await db.add_rule(text)
+        await message.reply(f"записав, правило №{number} ✍️")
+
+    @router.message(Command("rules", "правила"))
+    async def list_rules(message: TgMessage) -> None:
+        if not allowed(message):
+            return
+        rules = await db.rules()
+        if not rules:
+            await message.reply("правил поки нема. додати: /правило <текст>")
+            return
+        lines = "\n".join(f"{i}. {rule}" for i, rule in enumerate(rules, 1))
+        await message.reply(f"{lines}\n\nвидалити: /видали <номер>")
+
+    @router.message(Command("unrule", "видали"))
+    async def delete_rule(message: TgMessage, command: CommandObject) -> None:
+        if not allowed(message):
+            return
+        args = (command.args or "").strip()
+        removed = await db.delete_rule(int(args)) if args.isdigit() else None
+        if removed is None:
+            await message.reply("вкажи номер правила зі списку /правила, наприклад: /видали 2")
+            return
+        await message.reply(f"прибрав: {removed}")
 
     @router.message(Command("ids"))
     async def show_ids(message: TgMessage) -> None:

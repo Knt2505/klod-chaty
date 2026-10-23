@@ -30,6 +30,7 @@ async def main() -> None:
         timezone=cfg.timezone,
         debounce_seconds=cfg.debounce_seconds,
         history_limit=cfg.history_limit,
+        nudge_minutes=cfg.nudge_minutes,
     )
     binding = await Binding.load(cfg, db)
     if not binding.bound:

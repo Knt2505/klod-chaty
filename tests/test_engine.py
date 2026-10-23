@@ -1,5 +1,7 @@
 import asyncio
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -11,6 +13,14 @@ from app.transcript import clean_reply
 class FakeLLM:
     def __init__(self):
         self.calls = []
+        self.plans = []  # що поверне режисер; порожньо — режисер «падає» і працюють прості правила
+        self.director_prompts = []
+
+    async def direct(self, system, prompt, schema):
+        self.director_prompts.append((system, prompt))
+        if not self.plans:
+            raise RuntimeError("no director in this test")
+        return self.plans.pop(0)
 
     async def generate(self, persona, system, prompt, images):
         self.calls.append((persona, system, prompt, images))
@@ -20,6 +30,7 @@ class FakeLLM:
 class FakeSender:
     def __init__(self):
         self.sent = []
+        self.reactions = []
 
     async def typing(self, chat_id, persona):
         pass
@@ -27,6 +38,9 @@ class FakeSender:
     async def send(self, chat_id, persona, text):
         self.sent.append((persona, text))
         return 1000 + len(self.sent)
+
+    async def react(self, chat_id, persona, message_id, emoji):
+        self.reactions.append((persona, message_id, emoji))
 
     async def download(self, file_id):
         return f"bytes-{file_id}".encode()
@@ -38,7 +52,8 @@ async def setup(tmp_path):
     await db.connect()
     llm, sender = FakeLLM(), FakeSender()
     engine = Engine(db, llm, sender, timezone="America/Chicago", debounce_seconds=0.05,
-                    history_limit=30, rng=random.Random(1), typing_pace=0)
+                    history_limit=30, rng=random.Random(1), typing_pace=0, nudge_minutes=0,
+                    clock=lambda: datetime(2026, 10, 23, 14, 0, tzinfo=ZoneInfo("America/Chicago")))
     yield engine, db, llm, sender
     await db.close()
 
@@ -76,7 +91,12 @@ async def test_binding_persists_and_migrates(setup, tmp_path):
     from app.telegram import Binding
 
     _, db, _, _ = setup
-    cfg = Config("k", "c", "a", "o", None, None, "m1", "m2", None, "x", "America/Chicago", 1, 30)
+    cfg = Config(
+        klod_token="k", chaty_token="c", anthropic_api_key="a", openai_api_key="o",
+        owner_id=None, chat_id=None, klod_model="m1", director_model="m3", chaty_model="m2",
+        chaty_reasoning_effort=None, db_path="x", timezone="America/Chicago",
+        debounce_seconds=1, history_limit=30, nudge_minutes=5,
+    )
     binding = await Binding.load(cfg, db)
     assert not binding.bound
     await binding.save(db, -100, 42)
@@ -142,3 +162,72 @@ async def test_mentioned_persona_answers_once(setup):
     await asyncio.sleep(0.2)
     # Клод покликав Чаті — той відповів; Чаті згадав Клода, але Клод уже говорив у цьому раунді.
     assert [p for p, _ in sender.sent] == ["klod", "chaty"]
+
+
+def plan(*actions, meaning="m", quiet=0):
+    return {"meaning": meaning, "quiet_minutes": quiet, "plan": [
+        {"who": who, "action": kind, "emoji": emoji, "intent": intent} for who, kind, emoji, intent in actions
+    ]}
+
+
+async def test_director_reaction_and_text(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("chaty", "reaction", "🔥", ""), ("klod", "text", "", "порадій разом"))]
+    await engine.on_user_message(1, "нарешті", 77, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert sender.reactions == [("chaty", 77, "🔥")]
+    assert [p for p, _ in sender.sent] == ["klod"]
+    assert "Що тобі варто зробити: порадій разом" in llm.calls[0][2]
+    assert "Що відбувається: m" in llm.calls[0][2]
+
+
+async def test_director_can_stay_silent_and_invalid_emoji_dropped(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("klod", "reaction", "🦄", ""))]
+    await engine.on_user_message(1, "ок", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert sender.sent == [] and sender.reactions == []
+
+
+async def test_quiet_request_blocks_nudge_until_user_writes(setup):
+    engine, db, llm, sender = setup
+    llm.plans = [plan(("klod", "reaction", "👌", ""), quiet=60)]
+    await engine.on_user_message(1, "не мішайте", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert await engine.is_quiet(1)
+    await db.add_message(1, "klod", "йо")
+    await engine.nudge(1)
+    assert sender.sent == []
+    await engine.on_user_message(1, "я тут", 6, None, "Ден")
+    assert not await engine.is_quiet(1)
+
+
+async def test_nudge_once_after_silence(setup):
+    engine, db, llm, sender = setup
+    engine.nudge_minutes = 0.002  # ~0.1 с
+    llm.plans = [plan(("klod", "text", "", "відповісти")), plan(("chaty", "text", "", "підхопити тему"))]
+    await engine.on_user_message(1, "Клод, привіт", 5, None, "Ден")
+    await asyncio.sleep(0.5)
+    assert [p for p, _ in sender.sent] == ["klod", "chaty"]
+    assert "мовчить" in llm.director_prompts[1][1]
+    await asyncio.sleep(0.3)
+    assert len(sender.sent) == 2  # другий раз без нового повідомлення не пише
+
+
+async def test_no_nudge_at_night(setup):
+    engine, db, llm, sender = setup
+    engine.clock = lambda: datetime(2026, 10, 23, 2, 30, tzinfo=ZoneInfo("America/Chicago"))
+    await db.add_message(1, "klod", "йо")
+    await engine.nudge(1)
+    assert llm.director_prompts == []
+
+
+async def test_rules_reach_prompts(setup):
+    engine, db, llm, sender = setup
+    await db.add_rule("не допитуйся")
+    llm.plans = [plan(("klod", "text", "", "x"))]
+    await engine.on_user_message(1, "йо", 5, None, "Ден")
+    await asyncio.sleep(0.2)
+    assert "1. не допитуйся" in llm.calls[0][1]
+    assert "1. не допитуйся" in llm.director_prompts[0][0]
+    assert await db.delete_rule(1) == "не допитуйся" and await db.rules() == []

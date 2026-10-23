@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import time
 
@@ -33,6 +34,22 @@ class LLM:
             text = await self._gpt(system, prompt, encoded)
         log.info("%s answered in %.1fs", persona, time.monotonic() - started)
         return text
+
+    async def direct(self, system: str, prompt: str, schema: dict) -> dict:
+        """Режисер: швидке рішення у вигляді JSON за схемою."""
+        started = time.monotonic()
+        response = await self.anthropic.messages.create(
+            model=self.cfg.director_model,
+            max_tokens=1000,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            thinking={"type": "disabled"},
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        log.info("director decided in %.1fs", time.monotonic() - started)
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"director refused: {response.stop_details}")
+        return json.loads(next(block.text for block in response.content if block.type == "text"))
 
     async def _claude(self, system: str, prompt: str, images: list[str]) -> str:
         content = [

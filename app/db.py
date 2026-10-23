@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
+CREATE TABLE IF NOT EXISTS rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -98,3 +103,26 @@ class Database:
             "UPDATE messages SET chat_id = ? WHERE chat_id = ?", (new_chat_id, old_chat_id)
         )
         await self.conn.commit()
+
+    async def rules(self) -> list[str]:
+        cursor = await self.conn.execute("SELECT text FROM rules ORDER BY id")
+        return [row[0] for row in await cursor.fetchall()]
+
+    async def add_rule(self, text: str) -> int:
+        await self.conn.execute(
+            "INSERT INTO rules (text, created_at) VALUES (?, ?)",
+            (text, datetime.now(timezone.utc).isoformat()),
+        )
+        await self.conn.commit()
+        return len(await self.rules())
+
+    async def delete_rule(self, number: int) -> str | None:
+        """Видаляє правило за номером у списку (з 1). Повертає його текст або None."""
+        cursor = await self.conn.execute("SELECT id, text FROM rules ORDER BY id")
+        rows = await cursor.fetchall()
+        if not 1 <= number <= len(rows):
+            return None
+        rule_id, text = rows[number - 1]
+        await self.conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+        await self.conn.commit()
+        return text

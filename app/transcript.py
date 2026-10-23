@@ -11,8 +11,9 @@ def author_name(author: str, user_name: str) -> str:
 
 
 def render_history(
-    history: list[Message], user_name: str, tz: ZoneInfo, attached: list[str] = ()
+    history: list[Message], user_name: str, tz: ZoneInfo, attached: list[str] | None = None
 ) -> str:
+    """attached=None — не позначати фото взагалі (для режисера, який їх не бачить)."""
     lines = []
     for msg in history:
         stamp = msg.created_at.astimezone(tz).strftime("%a %H:%M")
@@ -23,9 +24,11 @@ def render_history(
             else ""
         )
         image = ""
-        if msg.image_file_id in attached:
+        if attached is None or not msg.image_file_id:
+            pass
+        elif msg.image_file_id in attached:
             image = f" (фото №{attached.index(msg.image_file_id) + 1}, прикріплене — ти його бачиш)"
-        elif msg.image_file_id:
+        else:
             image = " (старе фото, ти його вже не бачиш)"
         lines.append(f"[{stamp}] {name}{reply}: {msg.text}{image}")
     return "\n".join(lines)
@@ -37,6 +40,9 @@ def build_prompt(
     user_name: str,
     tz: ZoneInfo,
     attached: list[str] = (),
+    *,
+    meaning: str = "",
+    intent: str = "",
 ) -> str:
     intro = (
         f"Ви щойно почали спілкуватися і майже нічого не знаєте про {user_name}.\n\n"
@@ -45,9 +51,21 @@ def build_prompt(
     )
     return (
         intro + "Останні повідомлення в груповому чаті:\n\n"
-        f"{render_history(history, user_name, tz, attached)}\n\n"
+        f"{render_history(history, user_name, tz, list(attached))}\n\n"
+        f"{_hint(meaning, intent)}"
         f"Напиши наступне повідомлення від імені {DISPLAY_NAMES[persona]}."
     )
+
+
+def _hint(meaning: str, intent: str) -> str:
+    lines = []
+    if meaning:
+        lines.append(f"Що відбувається: {meaning}")
+    if intent:
+        lines.append(f"Що тобі варто зробити: {intent}")
+    if not lines:
+        return ""
+    return "Підказка (не цитуй її, просто врахуй):\n" + "\n".join(lines) + "\n\n"
 
 
 _NAME_PREFIX = re.compile(r"^\s*(\[[^\]]*\]\s*)?(Клод|Чаті)\s*:\s*", re.IGNORECASE)
