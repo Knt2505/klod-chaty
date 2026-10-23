@@ -2,9 +2,11 @@
 
 import re
 
-MAX_PARTS = 2
+MAX_PARTS = 5
+MAX_PART_LENGTH = 50  # довше — ріжемо по реченнях на окремі повідомлення
 
 _PARAGRAPHS = re.compile(r"\n\s*\n")
+_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
 # Початок повідомлення або початок речення після . ! ? …
 _SENTENCE_START = re.compile(r"(^|[.!?…]\s+)(\w)(\w*)")
 
@@ -35,10 +37,21 @@ def _plain_punctuation(text: str) -> str:
     return _DASH.sub(", ", _QUOTES.sub("", text)).replace(", ,", ",")
 
 
+def _split_long(paragraph: str) -> list[str]:
+    """Довгий абзац -> кілька коротких повідомлень, по цілих реченнях."""
+    chunks: list[str] = []
+    for sentence in _SENTENCE_END.split(paragraph):
+        if chunks and len(chunks[-1]) + 1 + len(sentence) <= MAX_PART_LENGTH:
+            chunks[-1] += " " + sentence
+        else:
+            chunks.append(sentence)
+    return chunks
+
+
 def humanize(text: str) -> list[str]:
-    """Розбиває відповідь на 1–3 повідомлення і робить їх схожими на людські."""
-    parts = [" ".join(p.split()) for p in _PARAGRAPHS.split(text.strip())]
-    parts = [p for p in parts if p]
+    """Розбиває відповідь на 1–5 коротких повідомлень і робить їх схожими на людські."""
+    paragraphs = [" ".join(p.split()) for p in _PARAGRAPHS.split(text.strip())]
+    parts = [chunk for p in paragraphs if p for chunk in _split_long(p)]
     if len(parts) > MAX_PARTS:
         parts = parts[: MAX_PARTS - 1] + [" ".join(parts[MAX_PARTS - 1 :])]
     return [_drop_final_period(_lower_sentence_starts(_plain_punctuation(p))) for p in parts]
