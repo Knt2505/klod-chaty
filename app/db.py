@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -69,3 +73,22 @@ class Database:
             Message(author, text, datetime.fromisoformat(created_at), tg_id, reply_to)
             for author, text, created_at, tg_id, reply_to in reversed(rows)
         ]
+
+    async def get_setting(self, key: str) -> str | None:
+        cursor = await self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await self.conn.commit()
+
+    async def move_chat(self, old_chat_id: int, new_chat_id: int) -> None:
+        await self.conn.execute(
+            "UPDATE messages SET chat_id = ? WHERE chat_id = ?", (new_chat_id, old_chat_id)
+        )
+        await self.conn.commit()

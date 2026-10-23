@@ -5,6 +5,7 @@
 """
 
 import logging
+from dataclasses import dataclass
 
 from aiogram import Bot, Router
 from aiogram.enums import ChatAction
@@ -12,6 +13,7 @@ from aiogram.filters import Command
 from aiogram.types import Message as TgMessage
 
 from .config import Config
+from .db import Database
 from .engine import Engine
 from .models import Persona
 
@@ -52,14 +54,57 @@ def describe(message: TgMessage) -> str | None:
     return None
 
 
-def build_router(engine: Engine, cfg: Config, bot_ids: dict[int, Persona]) -> Router:
+@dataclass
+class Binding:
+    """До якої групи і якої людини прив'язані боти (з .env або через /bind)."""
+
+    chat_id: int | None
+    owner_id: int | None
+
+    @property
+    def bound(self) -> bool:
+        return self.chat_id is not None and self.owner_id is not None
+
+    @classmethod
+    async def load(cls, cfg: Config, db: Database) -> "Binding":
+        chat_id = cfg.chat_id or _to_int(await db.get_setting("chat_id"))
+        owner_id = cfg.owner_id or _to_int(await db.get_setting("owner_id"))
+        return cls(chat_id, owner_id)
+
+    async def save(self, db: Database, chat_id: int, owner_id: int) -> None:
+        self.chat_id, self.owner_id = chat_id, owner_id
+        await db.set_setting("chat_id", str(chat_id))
+        await db.set_setting("owner_id", str(owner_id))
+
+
+def _to_int(value: str | None) -> int | None:
+    return int(value) if value else None
+
+
+def build_router(
+    engine: Engine, db: Database, binding: Binding, bot_ids: dict[int, Persona]
+) -> Router:
     router = Router()
 
     def allowed(message: TgMessage) -> bool:
-        if cfg.chat_id is None or cfg.owner_id is None:
-            return False
         user = message.from_user
-        return message.chat.id == cfg.chat_id and user is not None and user.id == cfg.owner_id
+        return (
+            binding.bound
+            and message.chat.id == binding.chat_id
+            and user is not None
+            and user.id == binding.owner_id
+        )
+
+    @router.message(Command("bind"))
+    async def bind(message: TgMessage) -> None:
+        if binding.bound or message.from_user is None:
+            return
+        if message.chat.type not in ("group", "supergroup"):
+            await message.reply("Додай мене і Чаті в групу і напиши /bind там.")
+            return
+        await binding.save(db, message.chat.id, message.from_user.id)
+        log.info("bound to chat %s, owner %s", binding.chat_id, binding.owner_id)
+        await message.reply("готово, ми на місці. тепер це наш чат 🤝")
 
     @router.message(Command("ids"))
     async def show_ids(message: TgMessage) -> None:
@@ -68,9 +113,15 @@ def build_router(engine: Engine, cfg: Config, bot_ids: dict[int, Persona]) -> Ro
 
     @router.message()
     async def on_message(message: TgMessage) -> None:
+        # Група стала супергрупою — Telegram змінив її ID, переносимо прив'язку й історію.
+        if message.migrate_to_chat_id and message.chat.id == binding.chat_id:
+            await db.move_chat(message.chat.id, message.migrate_to_chat_id)
+            await binding.save(db, message.migrate_to_chat_id, binding.owner_id)
+            log.info("chat migrated to %s", binding.chat_id)
+            return
         if not allowed(message):
-            if cfg.chat_id is None or cfg.owner_id is None:
-                log.warning("CHAT_ID/OWNER_ID не задано — напиши /ids у групі")
+            if not binding.bound:
+                log.warning("Боти ще не прив'язані — напиши /bind у своїй групі")
             return
         text = describe(message)
         if not text:
@@ -79,7 +130,7 @@ def build_router(engine: Engine, cfg: Config, bot_ids: dict[int, Persona]) -> Ro
         original = message.reply_to_message
         if original and original.from_user:
             reply_to = bot_ids.get(original.from_user.id)
-            if reply_to is None and original.from_user.id == cfg.owner_id:
+            if reply_to is None and original.from_user.id == binding.owner_id:
                 reply_to = "user"
         await engine.on_user_message(
             message.chat.id,

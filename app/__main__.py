@@ -7,7 +7,7 @@ from .config import load_config
 from .db import Database
 from .engine import Engine
 from .llm import LLM
-from .telegram import TelegramSender, build_router
+from .telegram import Binding, TelegramSender, build_router
 
 
 async def main() -> None:
@@ -31,8 +31,11 @@ async def main() -> None:
         debounce_seconds=cfg.debounce_seconds,
         history_limit=cfg.history_limit,
     )
+    binding = await Binding.load(cfg, db)
+    if not binding.bound:
+        logging.warning("Боти ще не прив'язані — додай обох у групу і напиши там /bind")
     dp = Dispatcher()
-    dp.include_router(build_router(engine, cfg, {klod_me.id: "klod", chaty_me.id: "chaty"}))
+    dp.include_router(build_router(engine, db, binding, {klod_me.id: "klod", chaty_me.id: "chaty"}))
 
     try:
         await dp.start_polling(klod_bot, allowed_updates=["message"])

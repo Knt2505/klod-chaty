@@ -66,3 +66,22 @@ def test_clean_reply():
     assert clean_reply("[Пт 18:02] Чаті: йо") == "йо"
     assert clean_reply("Клод: ок") == "ок"
     assert clean_reply("клод правий") == "клод правий"
+
+
+async def test_binding_persists_and_migrates(setup, tmp_path):
+    from app.config import Config
+    from app.telegram import Binding
+
+    _, db, _, _ = setup
+    cfg = Config("k", "c", "a", "o", None, None, "m1", "m2", None, "x", "America/Chicago", 1, 30)
+    binding = await Binding.load(cfg, db)
+    assert not binding.bound
+    await binding.save(db, -100, 42)
+    await db.add_message(-100, "user", "йо")
+    assert (await Binding.load(cfg, db)).chat_id == -100
+
+    await db.move_chat(-100, -200)
+    await binding.save(db, -200, 42)
+    reloaded = await Binding.load(cfg, db)
+    assert (reloaded.chat_id, reloaded.owner_id) == (-200, 42)
+    assert [m.text for m in await db.recent(-200, 5)] == ["йо"]
